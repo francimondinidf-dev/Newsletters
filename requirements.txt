@@ -1,0 +1,6 @@
+praw==7.7.1
+anthropic>=0.40.0
+python-dotenv==1.0.1
+tenacity==8.2.3
+rich==13.7.0
+pywin32>=306
