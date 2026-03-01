@@ -49,7 +49,8 @@ dev-radar/
 - r/programming
 - r/webdev
 - r/devops
-- r/SideProject
+- r/dataengineering
+- r/MLOps
 - r/indiehackers
 
 To add or remove subreddits, edit the `SUBREDDITS` list in `src/config.py`.
@@ -148,8 +149,12 @@ python -m src.main --report-only --week 2026-02-27   # Specific week
 
 Reports are saved as plain text to `reports/YYYY-MM-DD.txt` and contain:
 
-- Leaderboard of top 15 tools (name, company, HQ, score, mentions)
-- Per-tool profile: category, company, HQ, excitement score, summary, quotes
+- Preface explaining the two-section structure
+- **Section 1: Data & AI Infrastructure** — top 7 tools (data engineering,
+  MLOps, databases, LLM frameworks, AI platforms)
+- **Section 2: Developer Tools & DevOps** — top 7 tools (CI/CD, frontend,
+  backend, CLI, monitoring, security)
+- Each section has a leaderboard and per-tool profiles (company, HQ, score, quotes)
 - New entries, trending up/down, dropped off (week-on-week comparison)
 - Emerging trends and notable shifts
 - Source breakdown by subreddit

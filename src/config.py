@@ -22,7 +22,8 @@ SUBREDDITS: list[str] = [
     "programming",
     "webdev",
     "devops",
-    "SideProject",
+    "dataengineering",
+    "MLOps",
     "indiehackers",
 ]
 

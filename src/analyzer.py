@@ -32,7 +32,15 @@ SYSTEM_PROMPT = textwrap.dedent("""
 
     For each tool/solution identified:
     1. Name of the tool/solution
-    2. Category (e.g., DevOps, Frontend, AI/ML, Database, Monitoring, etc.)
+    2. Category — assign each tool to one of these two groups using the suggested
+       category labels:
+       - Data & AI Infrastructure: "AI/ML", "Data Engineering", "MLOps",
+         "Database", "Vector Database", "Data Pipeline", "LLM Framework",
+         "AI Platform", "Analytics", "Data Warehouse", "Feature Store",
+         "Model Serving"
+       - Developer Tools & DevOps: "DevOps", "Frontend", "Backend", "CLI",
+         "Monitoring", "Security", "Testing", "Runtime", "Cloud Infrastructure",
+         "Editor", "CI/CD", "Payments", "Email", "Other"
     3. Excitement score (1-10) based on sentiment and engagement
     4. excitement_reason: exactly ONE punchy sentence capturing the core reason devs are excited right now
     5. Brief summary of why developers are excited (2-3 sentences)

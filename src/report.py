@@ -36,6 +36,14 @@ _CATEGORY_EMOJI: dict[str, str] = {
     "other": "🔧",
 }
 
+# Keywords that classify a tool into the Data & AI Infrastructure section
+_DATA_AI_KEYWORDS = {
+    "ai", "ml", "data", "database", "llm", "model", "mlops", "analytics",
+    "vector", "feature", "pipeline", "warehouse", "embeddings", "serving",
+}
+
+MAX_SECTION_TOOLS = 7
+
 
 def _category_emoji(category: str) -> str:
     return _CATEGORY_EMOJI.get(category.lower(), "🔧")
@@ -44,6 +52,12 @@ def _category_emoji(category: str) -> str:
 def _score_bar(score: float, width: int = 10) -> str:
     filled = round(score / 10 * width)
     return "█" * filled + "░" * (width - filled)
+
+
+def _is_data_ai(tool: dict[str, Any]) -> bool:
+    cat = tool.get("category", "").lower()
+    words = set(cat.replace("/", " ").replace("-", " ").split())
+    return bool(words & _DATA_AI_KEYWORDS)
 
 
 # ── Console output ─────────────────────────────────────────────────────────
@@ -125,6 +139,11 @@ def _section(title: str) -> str:
     return f"\n{title}\n" + "-" * len(title)
 
 
+def _section_banner(title: str) -> list[str]:
+    bar = "=" * _W
+    return ["", bar, title.center(_W), bar]
+
+
 def _wrap(text: str, indent: int = 0) -> str:
     """Word-wrap text to _W columns with a leading indent."""
     import textwrap
@@ -132,67 +151,8 @@ def _wrap(text: str, indent: int = 0) -> str:
     return textwrap.fill(text, width=_W, initial_indent=prefix, subsequent_indent=prefix)
 
 
-def generate_report(
-    current: dict[str, Any],
-    previous: dict[str, Any] | None,
-) -> Path:
-    week = current.get("week", date.today().strftime("%Y-%m-%d"))
-    tools = current.get("tools", [])
-
-    prev_tools: dict[str, dict[str, Any]] = {}
-    if previous:
-        for t in previous.get("tools", []):
-            prev_tools[t["name"].lower()] = t
-
-    prev_names = set(prev_tools.keys())
-    curr_names = {t["name"].lower() for t in tools}
-
-    new_entries = [t for t in tools if t["name"].lower() not in prev_names]
-    returning = [t for t in tools if t["name"].lower() in prev_names]
-
-    trending_up, trending_down = [], []
-    for t in returning:
-        key = t["name"].lower()
-        delta = t.get("excitement_score", 0) - prev_tools[key].get("excitement_score", 0)
-        if delta >= 1.0:
-            trending_up.append((t, delta))
-        elif delta <= -1.0:
-            trending_down.append((t, abs(delta)))
-
-    trending_up.sort(key=lambda x: x[1], reverse=True)
-    trending_down.sort(key=lambda x: x[1], reverse=True)
-
-    dropped = (
-        [prev_tools[n] for n in prev_names if n not in curr_names]
-        if previous else []
-    )
-
-    lines: list[str] = []
-
-    # ── Header ──────────────────────────────────────────────────────────────
-    lines += [
-        _rule("="),
-        f"  DEV RADAR  --  Week of {week}".center(_W),
-        (
-            f"Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}  |  "
-            f"{len(tools)} tools  |  {len(cfg.SUBREDDITS)} subreddits"
-        ).center(_W),
-        _rule("="),
-    ]
-
-    # ── Quick stats ──────────────────────────────────────────────────────────
-    lines += [
-        _section("QUICK STATS"),
-        "",
-        f"  Tools analysed  : {len(tools)}",
-        f"  New this week   : {len(new_entries)}",
-        f"  Trending up     : {len(trending_up)}",
-        f"  Trending down   : {len(trending_down)}",
-        f"  Dropped off     : {len(dropped)}",
-    ]
-
-    # ── Top-15 leaderboard ───────────────────────────────────────────────────
-    lines += [_section("TOP TOOLS THIS WEEK"), ""]
+def _leaderboard_block(tools: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = [_section("TOP TOOLS"), ""]
     col_rank = 3
     col_name = 38
     col_cat  = 18
@@ -205,7 +165,7 @@ def generate_report(
         f"Mentions"
     )
     lines += [header, "  " + "-" * (len(header) - 2)]
-    for rank, tool in enumerate(tools[:15], 1):
+    for rank, tool in enumerate(tools, 1):
         score = tool.get("excitement_score", 0)
         name = tool["name"]
         if len(name) > col_name:
@@ -220,10 +180,16 @@ def generate_report(
             f"{score:.1f}/10  "
             f"{tool.get('mention_count', 0)}"
         )
+    return lines
 
-    # ── Tool profiles ─────────────────────────────────────────────────────────
-    lines += [_section("TOOL PROFILES")]
-    for rank, tool in enumerate(tools[:15], 1):
+
+def _profiles_block(
+    tools: list[dict[str, Any]],
+    prev_tools: dict[str, dict[str, Any]],
+    previous: dict[str, Any] | None,
+) -> list[str]:
+    lines: list[str] = [_section("TOOL PROFILES")]
+    for rank, tool in enumerate(tools, 1):
         score = tool.get("excitement_score", 0)
         bar = _score_bar(score, width=10)
         key = tool["name"].lower()
@@ -266,6 +232,114 @@ def generate_report(
                 lines += [_wrap(f'"{q_clean}"', indent=6)]
         lines.append("")
         lines.append("  " + "-" * (_W - 2))
+    return lines
+
+
+def generate_report(
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+) -> Path:
+    week = current.get("week", date.today().strftime("%Y-%m-%d"))
+    tools = current.get("tools", [])
+
+    prev_tools: dict[str, dict[str, Any]] = {}
+    if previous:
+        for t in previous.get("tools", []):
+            prev_tools[t["name"].lower()] = t
+
+    prev_names = set(prev_tools.keys())
+    curr_names = {t["name"].lower() for t in tools}
+
+    new_entries = [t for t in tools if t["name"].lower() not in prev_names]
+    returning = [t for t in tools if t["name"].lower() in prev_names]
+
+    trending_up, trending_down = [], []
+    for t in returning:
+        key = t["name"].lower()
+        delta = t.get("excitement_score", 0) - prev_tools[key].get("excitement_score", 0)
+        if delta >= 1.0:
+            trending_up.append((t, delta))
+        elif delta <= -1.0:
+            trending_down.append((t, abs(delta)))
+
+    trending_up.sort(key=lambda x: x[1], reverse=True)
+    trending_down.sort(key=lambda x: x[1], reverse=True)
+
+    dropped = (
+        [prev_tools[n] for n in prev_names if n not in curr_names]
+        if previous else []
+    )
+
+    # Split tools into two sections, top MAX_SECTION_TOOLS each
+    data_ai_tools = [t for t in tools if _is_data_ai(t)][:MAX_SECTION_TOOLS]
+    devtools_tools = [t for t in tools if not _is_data_ai(t)][:MAX_SECTION_TOOLS]
+
+    lines: list[str] = []
+
+    # ── Header ──────────────────────────────────────────────────────────────
+    lines += [
+        _rule("="),
+        f"  DEV RADAR  --  Week of {week}".center(_W),
+        (
+            f"Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}  |  "
+            f"{len(tools)} tools  |  {len(cfg.SUBREDDITS)} subreddits"
+        ).center(_W),
+        _rule("="),
+    ]
+
+    # ── Preface ──────────────────────────────────────────────────────────────
+    lines += [
+        _section("ABOUT THIS REPORT"),
+        "",
+        _wrap("This week's Dev Radar is split into two sections:", indent=2),
+        "",
+        _wrap(
+            "1. Data & AI Infrastructure — tools shaping how data is stored, "
+            "processed, and consumed by AI/ML systems: data engineering, MLOps, "
+            "vector databases, LLM frameworks, and AI platforms.",
+            indent=4,
+        ),
+        "",
+        _wrap(
+            "2. Developer Tools & DevOps — tools that improve how software is "
+            "built, deployed, and operated: CI/CD, frontend frameworks, backend "
+            "tooling, CLI utilities, monitoring, and security.",
+            indent=4,
+        ),
+        "",
+        _wrap(
+            f"Each section highlights the top {MAX_SECTION_TOOLS} tools ranked "
+            "by community excitement score this week.",
+            indent=2,
+        ),
+    ]
+
+    # ── Quick stats ──────────────────────────────────────────────────────────
+    lines += [
+        _section("QUICK STATS"),
+        "",
+        f"  Tools analysed  : {len(tools)}",
+        f"  New this week   : {len(new_entries)}",
+        f"  Trending up     : {len(trending_up)}",
+        f"  Trending down   : {len(trending_down)}",
+        f"  Dropped off     : {len(dropped)}",
+    ]
+
+    # ── SECTION 1: Data & AI Infrastructure ─────────────────────────────────
+    lines += _section_banner("SECTION 1: DATA & AI INFRASTRUCTURE")
+    if data_ai_tools:
+        lines += _leaderboard_block(data_ai_tools)
+        lines += _profiles_block(data_ai_tools, prev_tools, previous)
+    else:
+        lines += ["", "  No Data & AI tools identified this week.", ""]
+
+    # ── SECTION 2: Developer Tools & DevOps ─────────────────────────────────
+    lines += _section_banner("SECTION 2: DEVELOPER TOOLS & DEVOPS")
+    if devtools_tools:
+        lines += _leaderboard_block(devtools_tools)
+        lines += _profiles_block(devtools_tools, prev_tools, previous)
+    else:
+        lines += ["", "  No Developer Tools identified this week.", ""]
 
     # ── Movement sections ────────────────────────────────────────────────────
     if new_entries:
