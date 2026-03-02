@@ -27,7 +27,7 @@ def send_report(report_path: Path, week: str) -> None:
     mail = outlook.CreateItem(0)  # 0 = olMailItem
     mail.To = recipients
     mail.Subject = f"Dev Radar — Week of {week}"
-    mail.Body = body
+    mail.HTMLBody = body
     mail.Send()
 
     logger.info("Report emailed to: %s", recipients)

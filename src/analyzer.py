@@ -119,6 +119,7 @@ class Analyzer:
             "Analysis complete — %d tools identified",
             len(aggregated.get("tools", [])),
         )
+        aggregated = self._generate_intro_paragraphs(aggregated)
         return aggregated
 
     # ── Batching ───────────────────────────────────────────────────────────
@@ -199,6 +200,50 @@ class Analyzer:
             logger.error("Could not parse Claude JSON response: %s", exc)
             logger.debug("Raw response: %s", raw[:500])
             return None
+
+    # ── Intro paragraphs ───────────────────────────────────────────────────
+
+    def _generate_intro_paragraphs(self, analysis: dict[str, Any]) -> dict[str, Any]:
+        """Generate per-section AI-disruption intro paragraphs via a small API call."""
+        tool_list = ", ".join(
+            f"{t['name']} ({t.get('category', 'Other')})"
+            for t in analysis.get("tools", [])[:20]
+        )
+        trends = "; ".join(analysis.get("emerging_trends", [])[:5])
+
+        prompt = (
+            "You are writing intro paragraphs for a weekly developer newsletter.\n\n"
+            f"This week's top tools: {tool_list}\n"
+            f"Key trends: {trends}\n\n"
+            "Write two paragraphs of 3-4 sentences each, grounded in this week's data:\n"
+            "1. devops_ai_disruption: How is AI currently transforming Developer Tools & "
+            "DevOps (CI/CD, IaC, containers, security, frontend, testing)?\n"
+            "2. data_ai_disruption: How is AI currently transforming Data & AI "
+            "Infrastructure (data engineering, MLOps, LLM tooling, databases, pipelines)?\n\n"
+            "Be specific. Reference actual tools from the list above where relevant.\n"
+            'Return ONLY this JSON (no markdown fences):\n'
+            '{"devops_ai_disruption": "...", "data_ai_disruption": "..."}'
+        )
+
+        try:
+            time.sleep(15)
+            response = self._client.messages.create(
+                model=cfg.CLAUDE_MODEL,
+                max_tokens=800,
+                temperature=1,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text.strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw).strip()
+            result = json.loads(raw)
+            analysis["devops_ai_disruption"] = result.get("devops_ai_disruption", "")
+            analysis["data_ai_disruption"] = result.get("data_ai_disruption", "")
+            logger.info("Intro paragraphs generated")
+        except Exception as exc:
+            logger.warning("Could not generate intro paragraphs: %s", exc)
+
+        return analysis
 
     # ── Aggregation ────────────────────────────────────────────────────────
 

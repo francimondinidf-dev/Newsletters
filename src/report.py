@@ -1,8 +1,10 @@
-"""Plain-text report generation and rich console summary."""
+"""Plain-text (archival) and HTML (email) report generation, plus rich console summary."""
 
 from __future__ import annotations
 
+import html as _html_lib
 import logging
+import textwrap
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -60,7 +62,7 @@ def _is_data_ai(tool: dict[str, Any]) -> bool:
     return bool(words & _DATA_AI_KEYWORDS)
 
 
-# ── Console output ─────────────────────────────────────────────────────────
+# ── Console output ──────────────────────────────────────────────────────────
 
 def print_console_summary(analysis: dict[str, Any]) -> None:
     week = analysis.get("week", "unknown")
@@ -126,9 +128,9 @@ def print_console_summary(analysis: dict[str, Any]) -> None:
     console.print()
 
 
-# ── Plain-text report ──────────────────────────────────────────────────────
+# ── Plain-text report (archival) ────────────────────────────────────────────
 
-_W = 80  # page width
+_W = 80
 
 
 def _rule(char: str = "=") -> str:
@@ -145,8 +147,6 @@ def _section_banner(title: str) -> list[str]:
 
 
 def _wrap(text: str, indent: int = 0) -> str:
-    """Word-wrap text to _W columns with a leading indent."""
-    import textwrap
     prefix = " " * indent
     return textwrap.fill(text, width=_W, initial_indent=prefix, subsequent_indent=prefix)
 
@@ -235,6 +235,302 @@ def _profiles_block(
     return lines
 
 
+# ── HTML report (email) ─────────────────────────────────────────────────────
+
+def _he(text: str) -> str:
+    """HTML-escape a value."""
+    return _html_lib.escape(str(text))
+
+
+def _html_score_badge(score: float) -> str:
+    color = "#27ae60" if score >= 8.5 else "#e67e22" if score >= 7.0 else "#7f8c8d"
+    return (
+        f'<span style="background:{color}; color:#fff; padding:2px 8px; '
+        f'border-radius:10px; font-size:12px; font-weight:bold;">'
+        f'{score:.1f}/10</span>'
+    )
+
+
+def _html_chip(text: str, color: str) -> str:
+    return (
+        f'<span style="background:{color}; color:#fff; padding:1px 6px; '
+        f'border-radius:3px; font-size:11px; font-weight:bold; margin-left:6px;">'
+        f'{_he(text)}</span>'
+    )
+
+
+def _html_leaderboard(tools: list[dict[str, Any]], prev_tools: dict) -> str:
+    rows = ""
+    for rank, tool in enumerate(tools, 1):
+        key = tool["name"].lower()
+        score = tool.get("excitement_score", 0)
+
+        badge = ""
+        if key in prev_tools:
+            delta = score - prev_tools[key].get("excitement_score", 0)
+            if delta >= 0.5:
+                badge = _html_chip(f"+{delta:.1f}", "#2980b9")
+            elif delta <= -0.5:
+                badge = _html_chip(f"{delta:.1f}", "#c0392b")
+        else:
+            badge = _html_chip("NEW", "#27ae60")
+
+        bg = "#fafafa" if rank % 2 == 0 else "#ffffff"
+        rows += (
+            f'<tr style="background:{bg};">'
+            f'<td style="padding:8px 10px; color:#999; font-weight:bold; width:28px;">{rank}</td>'
+            f'<td style="padding:8px 10px;"><strong>{_he(tool["name"])}</strong>{badge}</td>'
+            f'<td style="padding:8px 10px; color:#666;">{_he(tool.get("category", "Other"))}</td>'
+            f'<td style="padding:8px 10px; text-align:center;">{_html_score_badge(score)}</td>'
+            f'<td style="padding:8px 10px; text-align:right; color:#999;">{tool.get("mention_count", 0)}</td>'
+            f'</tr>'
+        )
+    return (
+        '<table style="width:100%; border-collapse:collapse; font-size:13px; margin:12px 0;">'
+        '<thead><tr style="background:#f0f0f0; text-align:left;">'
+        '<th style="padding:8px 10px; border-bottom:2px solid #ddd; width:28px;">#</th>'
+        '<th style="padding:8px 10px; border-bottom:2px solid #ddd;">Tool</th>'
+        '<th style="padding:8px 10px; border-bottom:2px solid #ddd;">Category</th>'
+        '<th style="padding:8px 10px; border-bottom:2px solid #ddd; text-align:center;">Score</th>'
+        '<th style="padding:8px 10px; border-bottom:2px solid #ddd; text-align:right;">Mentions</th>'
+        f'</tr></thead><tbody>{rows}</tbody></table>'
+    )
+
+
+def _html_profiles(
+    tools: list[dict[str, Any]],
+    prev_tools: dict,
+    previous: dict[str, Any] | None,
+) -> str:
+    parts = [
+        '<p style="font-size:12px; font-weight:bold; text-transform:uppercase; '
+        'letter-spacing:1px; color:#888; margin:20px 0 8px;">Tool Profiles</p>'
+    ]
+
+    for rank, tool in enumerate(tools, 1):
+        key = tool["name"].lower()
+        score = tool.get("excitement_score", 0)
+
+        badge = ""
+        if key in prev_tools:
+            delta = score - prev_tools[key].get("excitement_score", 0)
+            if delta >= 0.5:
+                badge = _html_chip(f"+{delta:.1f}", "#2980b9")
+            elif delta <= -0.5:
+                badge = _html_chip(f"{delta:.1f}", "#c0392b")
+        elif previous:
+            badge = _html_chip("NEW", "#27ae60")
+
+        meta_parts = []
+        if tool.get("company"):
+            meta_parts.append(_he(tool["company"]))
+        if tool.get("headquarters"):
+            meta_parts.append(_he(tool["headquarters"]))
+        meta_parts.append(f"{tool.get('mention_count', 0)} mentions")
+        subs = ", ".join(f"r/{s}" for s in tool.get("source_subreddits", []))
+        if subs:
+            meta_parts.append(_he(subs))
+        meta = " &nbsp;·&nbsp; ".join(meta_parts)
+
+        reason = _he(tool.get("excitement_reason", ""))
+        summary = _he(tool.get("summary", ""))
+
+        quotes_html = ""
+        for q in tool.get("representative_quotes", [])[:2]:
+            q_clean = _he(q.replace("\n", " ").strip()[:200])
+            quotes_html += (
+                f'<div style="border-left:3px solid #ddd; padding:4px 12px; '
+                f'margin:4px 0; color:#777; font-style:italic; font-size:13px;">'
+                f'"{q_clean}"</div>'
+            )
+
+        body = ""
+        if reason:
+            body += (
+                f'<div style="font-weight:bold; font-style:italic; color:#444; '
+                f'margin-top:10px; line-height:1.5;">{reason}</div>'
+            )
+        if summary:
+            body += f'<div style="margin-top:6px; line-height:1.6; color:#555;">{summary}</div>'
+        if quotes_html:
+            body += f'<div style="margin-top:8px;">{quotes_html}</div>'
+
+        parts.append(
+            f'<div style="border:1px solid #e8e8e8; border-radius:4px; margin:10px 0; padding:14px 16px;">'
+            f'<table style="width:100%; border-collapse:collapse;"><tr>'
+            f'<td><strong style="font-size:14px;">{rank}. {_he(tool["name"])}</strong>{badge}</td>'
+            f'<td style="text-align:right; white-space:nowrap;">{_html_score_badge(score)}</td>'
+            f'</tr></table>'
+            f'<div style="color:#999; font-size:12px; margin-top:4px;">{meta}</div>'
+            f'{body}'
+            f'</div>'
+        )
+
+    return "".join(parts)
+
+
+def _generate_html(
+    current: dict[str, Any],
+    previous: dict[str, Any] | None,
+    devtools_tools: list[dict[str, Any]],
+    data_ai_tools: list[dict[str, Any]],
+    prev_tools: dict,
+    new_entries: list,
+    trending_up: list,
+    trending_down: list,
+    dropped: list,
+) -> str:
+    week = current.get("week", date.today().strftime("%Y-%m-%d"))
+    tools = current.get("tools", [])
+    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+    devops_para = _he(current.get("devops_ai_disruption", ""))
+    data_para = _he(current.get("data_ai_disruption", ""))
+
+    parts = [f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Dev Radar — Week of {week}</title></head>
+<body style="font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#333; max-width:680px; margin:0 auto; padding:0; background:#fff;">
+
+<div style="background:#0f1923; color:#fff; padding:28px 24px; text-align:center;">
+  <div style="font-size:24px; font-weight:bold; letter-spacing:2px;">&#128301; DEV RADAR</div>
+  <div style="font-size:15px; color:#8ab4cc; margin-top:8px; letter-spacing:1px;">Week of {week}</div>
+  <div style="font-size:12px; color:#5a7a8a; margin-top:4px;">{len(tools)} tools identified &nbsp;&middot;&nbsp; {len(cfg.SUBREDDITS)} subreddits monitored</div>
+</div>
+
+<table style="width:100%; background:#1a2a3a; border-collapse:collapse;"><tr>
+  <td style="padding:12px 24px; color:#aaa; font-size:13px; text-align:center;">
+    <strong style="color:#fff;">{len(new_entries)}</strong>&nbsp;new
+    &nbsp;&nbsp;&middot;&nbsp;&nbsp;
+    <strong style="color:#5dbb63;">{len(trending_up)}</strong>&nbsp;&#8593; trending up
+    &nbsp;&nbsp;&middot;&nbsp;&nbsp;
+    <strong style="color:#e07070;">{len(trending_down)}</strong>&nbsp;&#8595; trending down
+    &nbsp;&nbsp;&middot;&nbsp;&nbsp;
+    <strong style="color:#888;">{len(dropped)}</strong>&nbsp;dropped off
+  </td>
+</tr></table>
+
+<div style="padding:0 24px 24px 24px;">
+"""]
+
+    # ── SECTION 1: Developer Tools & DevOps ────────────────────────────────
+    parts.append(
+        '<div style="background:#1e3a5f; color:#fff; padding:16px 24px; margin:28px -24px 0 -24px;">'
+        '<div style="font-size:17px; font-weight:bold; letter-spacing:1px;">'
+        '&#9881;&#65039;&nbsp; SECTION 1 &mdash; DEVELOPER TOOLS &amp; DEVOPS'
+        '</div></div>'
+    )
+
+    if devops_para:
+        parts.append(
+            f'<div style="background:#edf3fb; border-left:4px solid #1e3a5f; '
+            f'padding:14px 18px; margin:16px 0; font-style:italic; line-height:1.7; color:#334455;">'
+            f'{devops_para}</div>'
+        )
+
+    parts.append(
+        '<p style="font-size:12px; font-weight:bold; text-transform:uppercase; '
+        'letter-spacing:1px; color:#888; margin:16px 0 4px;">Leaderboard</p>'
+    )
+    if devtools_tools:
+        parts.append(_html_leaderboard(devtools_tools, prev_tools))
+        parts.append(_html_profiles(devtools_tools, prev_tools, previous))
+    else:
+        parts.append("<p><em>No Developer Tools identified this week.</em></p>")
+
+    # ── SECTION 2: Data & AI Infrastructure ────────────────────────────────
+    parts.append(
+        '<div style="background:#1a3a2a; color:#fff; padding:16px 24px; margin:32px -24px 0 -24px;">'
+        '<div style="font-size:17px; font-weight:bold; letter-spacing:1px;">'
+        '&#128202;&nbsp; SECTION 2 &mdash; DATA &amp; AI INFRASTRUCTURE'
+        '</div></div>'
+    )
+
+    if data_para:
+        parts.append(
+            f'<div style="background:#edfbf3; border-left:4px solid #1a3a2a; '
+            f'padding:14px 18px; margin:16px 0; font-style:italic; line-height:1.7; color:#334455;">'
+            f'{data_para}</div>'
+        )
+
+    parts.append(
+        '<p style="font-size:12px; font-weight:bold; text-transform:uppercase; '
+        'letter-spacing:1px; color:#888; margin:16px 0 4px;">Leaderboard</p>'
+    )
+    if data_ai_tools:
+        parts.append(_html_leaderboard(data_ai_tools, prev_tools))
+        parts.append(_html_profiles(data_ai_tools, prev_tools, previous))
+    else:
+        parts.append("<p><em>No Data &amp; AI tools identified this week.</em></p>")
+
+    # ── Week-on-week movement ───────────────────────────────────────────────
+    if new_entries or trending_up or trending_down or dropped:
+        parts.append(
+            '<div style="background:#f5f5f5; padding:14px 24px; margin:28px -24px 0 -24px; '
+            'border-top:2px solid #e0e0e0;">'
+            '<strong style="font-size:14px;">&#128200; Week-on-Week Movement</strong></div>'
+            '<div style="padding:10px 0;">'
+        )
+        if new_entries:
+            items = ", ".join(
+                f"<strong>{_he(t['name'])}</strong>&nbsp;({t.get('excitement_score', 0):.1f})"
+                for t in new_entries[:8]
+            )
+            parts.append(f'<p style="margin:6px 0;"><strong>&#128196; New this week:</strong> {items}</p>')
+        if trending_up:
+            items = ", ".join(
+                f"<strong>{_he(t['name'])}</strong>&nbsp;(+{d:.1f})" for t, d in trending_up[:5]
+            )
+            parts.append(f'<p style="margin:6px 0;"><strong>&#128200; Trending up:</strong> {items}</p>')
+        if trending_down:
+            items = ", ".join(
+                f"<strong>{_he(t['name'])}</strong>&nbsp;(&minus;{d:.1f})" for t, d in trending_down[:5]
+            )
+            parts.append(f'<p style="margin:6px 0;"><strong>&#128201; Trending down:</strong> {items}</p>')
+        if dropped:
+            items = ", ".join(_he(t["name"]) for t in dropped[:5])
+            parts.append(f'<p style="margin:6px 0;"><strong>Dropped off:</strong> {items}</p>')
+        parts.append("</div>")
+
+    # ── Trends & Shifts (top 5 each) ────────────────────────────────────────
+    trends = current.get("emerging_trends", [])[:5]
+    shifts = current.get("notable_shifts", [])[:5]
+    if trends or shifts:
+        parts.append(
+            '<div style="background:#f5f5f5; padding:14px 24px; margin:28px -24px 0 -24px; '
+            'border-top:2px solid #e0e0e0;">'
+            '<strong style="font-size:14px;">&#128161; Trends &amp; Shifts</strong></div>'
+        )
+        if trends:
+            parts.append(
+                '<p style="font-weight:bold; margin:14px 0 4px;">Emerging Trends</p>'
+                '<ul style="margin:0; padding-left:20px; line-height:1.9;">'
+            )
+            for t in trends:
+                parts.append(f"<li>{_he(t)}</li>")
+            parts.append("</ul>")
+        if shifts:
+            parts.append(
+                '<p style="font-weight:bold; margin:14px 0 4px;">Notable Shifts</p>'
+                '<ul style="margin:0; padding-left:20px; line-height:1.9;">'
+            )
+            for s in shifts:
+                parts.append(f"<li>{_he(s)}</li>")
+            parts.append("</ul>")
+
+    parts.append("</div>")  # end padding div
+
+    parts.append(
+        f'<div style="background:#0f1923; color:#5a7a8a; text-align:center; '
+        f'padding:16px; font-size:12px; margin-top:32px;">'
+        f'Dev Radar &nbsp;&middot;&nbsp; Powered by Reddit + Claude &nbsp;&middot;&nbsp; {generated_at}'
+        f'</div></body></html>'
+    )
+
+    return "".join(parts)
+
+
+# ── Main entry point ────────────────────────────────────────────────────────
+
 def generate_report(
     current: dict[str, Any],
     previous: dict[str, Any] | None,
@@ -270,13 +566,13 @@ def generate_report(
         if previous else []
     )
 
-    # Split tools into two sections, top MAX_SECTION_TOOLS each
-    data_ai_tools = [t for t in tools if _is_data_ai(t)][:MAX_SECTION_TOOLS]
+    # Section 1 = DevOps / Developer Tools, Section 2 = Data & AI
     devtools_tools = [t for t in tools if not _is_data_ai(t)][:MAX_SECTION_TOOLS]
+    data_ai_tools  = [t for t in tools if _is_data_ai(t)][:MAX_SECTION_TOOLS]
 
+    # ── Plain-text report (archival .txt) ────────────────────────────────────
     lines: list[str] = []
 
-    # ── Header ──────────────────────────────────────────────────────────────
     lines += [
         _rule("="),
         f"  DEV RADAR  --  Week of {week}".center(_W),
@@ -287,23 +583,22 @@ def generate_report(
         _rule("="),
     ]
 
-    # ── Preface ──────────────────────────────────────────────────────────────
     lines += [
         _section("ABOUT THIS REPORT"),
         "",
         _wrap("This week's Dev Radar is split into two sections:", indent=2),
         "",
         _wrap(
-            "1. Data & AI Infrastructure — tools shaping how data is stored, "
-            "processed, and consumed by AI/ML systems: data engineering, MLOps, "
-            "vector databases, LLM frameworks, and AI platforms.",
+            "1. Developer Tools & DevOps — tools that improve how software is "
+            "built, deployed, and operated: CI/CD, frontend frameworks, backend "
+            "tooling, CLI utilities, monitoring, and security.",
             indent=4,
         ),
         "",
         _wrap(
-            "2. Developer Tools & DevOps — tools that improve how software is "
-            "built, deployed, and operated: CI/CD, frontend frameworks, backend "
-            "tooling, CLI utilities, monitoring, and security.",
+            "2. Data & AI Infrastructure — tools shaping how data is stored, "
+            "processed, and consumed by AI/ML systems: data engineering, MLOps, "
+            "vector databases, LLM frameworks, and AI platforms.",
             indent=4,
         ),
         "",
@@ -314,7 +609,6 @@ def generate_report(
         ),
     ]
 
-    # ── Quick stats ──────────────────────────────────────────────────────────
     lines += [
         _section("QUICK STATS"),
         "",
@@ -325,23 +619,20 @@ def generate_report(
         f"  Dropped off     : {len(dropped)}",
     ]
 
-    # ── SECTION 1: Data & AI Infrastructure ─────────────────────────────────
-    lines += _section_banner("SECTION 1: DATA & AI INFRASTRUCTURE")
-    if data_ai_tools:
-        lines += _leaderboard_block(data_ai_tools)
-        lines += _profiles_block(data_ai_tools, prev_tools, previous)
-    else:
-        lines += ["", "  No Data & AI tools identified this week.", ""]
-
-    # ── SECTION 2: Developer Tools & DevOps ─────────────────────────────────
-    lines += _section_banner("SECTION 2: DEVELOPER TOOLS & DEVOPS")
+    lines += _section_banner("SECTION 1: DEVELOPER TOOLS & DEVOPS")
     if devtools_tools:
         lines += _leaderboard_block(devtools_tools)
         lines += _profiles_block(devtools_tools, prev_tools, previous)
     else:
         lines += ["", "  No Developer Tools identified this week.", ""]
 
-    # ── Movement sections ────────────────────────────────────────────────────
+    lines += _section_banner("SECTION 2: DATA & AI INFRASTRUCTURE")
+    if data_ai_tools:
+        lines += _leaderboard_block(data_ai_tools)
+        lines += _profiles_block(data_ai_tools, prev_tools, previous)
+    else:
+        lines += ["", "  No Data & AI tools identified this week.", ""]
+
     if new_entries:
         lines += [_section("NEW THIS WEEK"), ""]
         for t in new_entries[:10]:
@@ -371,7 +662,6 @@ def generate_report(
         for t in dropped[:5]:
             lines.append(f"  - {t['name']}  (was {t.get('excitement_score',0):.1f})")
 
-    # ── Trends & shifts ───────────────────────────────────────────────────────
     trends = current.get("emerging_trends", [])
     if trends:
         lines += [_section("EMERGING TRENDS"), ""]
@@ -384,7 +674,6 @@ def generate_report(
         for shift in shifts:
             lines += [_wrap(shift, indent=4), ""]
 
-    # ── Source breakdown ──────────────────────────────────────────────────────
     sub_counts: dict[str, int] = {}
     for tool in tools:
         for sub in tool.get("source_subreddits", []):
@@ -396,7 +685,6 @@ def generate_report(
             bar = "#" * count
             lines.append(f"  r/{sub:<20} {bar} ({count})")
 
-    # ── Footer ────────────────────────────────────────────────────────────────
     lines += [
         "",
         _rule("="),
@@ -404,7 +692,17 @@ def generate_report(
         _rule("="),
     ]
 
-    report_path = cfg.REPORTS_DIR / f"{week}.txt"
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-    logger.info("Report saved to %s", report_path)
-    return report_path
+    txt_path = cfg.REPORTS_DIR / f"{week}.txt"
+    txt_path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info("Report saved to %s", txt_path)
+
+    # ── HTML report (email) ──────────────────────────────────────────────────
+    html_content = _generate_html(
+        current, previous,
+        devtools_tools, data_ai_tools,
+        prev_tools, new_entries, trending_up, trending_down, dropped,
+    )
+    html_path = cfg.REPORTS_DIR / f"{week}.html"
+    html_path.write_text(html_content, encoding="utf-8")
+
+    return html_path
