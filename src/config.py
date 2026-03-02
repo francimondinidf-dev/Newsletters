@@ -40,7 +40,7 @@ REDDIT_USER_AGENT: str = os.getenv("REDDIT_USER_AGENT", "dev-radar/1.0")
 
 # ── Claude config ──────────────────────────────────────────────────────────
 CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-MAX_BATCH_CHARS: int = int(os.getenv("MAX_BATCH_CHARS", "400000"))
+MAX_BATCH_CHARS: int = int(os.getenv("MAX_BATCH_CHARS", "100000"))
 
 # ── Logging ────────────────────────────────────────────────────────────────
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

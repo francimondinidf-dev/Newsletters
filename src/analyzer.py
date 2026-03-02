@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import textwrap
+import time
 from datetime import date
 from typing import Any
 
@@ -80,7 +81,7 @@ SYSTEM_PROMPT = textwrap.dedent("""
 
 _retry_claude = retry(
     retry=retry_if_exception_type((anthropic.RateLimitError, anthropic.APIConnectionError)),
-    stop=stop_after_attempt(5),
+    stop=stop_after_attempt(8),
     wait=wait_exponential(multiplier=2, min=4, max=60),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
@@ -100,6 +101,9 @@ class Analyzer:
 
         batch_results: list[dict[str, Any]] = []
         for i, batch in enumerate(batches, 1):
+            if i > 1:
+                logger.info("Waiting 65s between batches to respect API rate limit")
+                time.sleep(65)
             logger.info(
                 "Processing batch %d / %d (%d posts)", i, len(batches), len(batch)
             )
@@ -156,6 +160,8 @@ class Analyzer:
 
         user_message = (
             f"Current week: {week_str}\n\n"
+            f"Identify the top 20 most-discussed developer tools only. "
+            f"Be concise — one sentence max per field.\n\n"
             f"=== REDDIT POSTS ===\n\n{content}"
         )
 
@@ -163,7 +169,7 @@ class Analyzer:
 
         response = self._client.messages.create(
             model=cfg.CLAUDE_MODEL,
-            max_tokens=8000,
+            max_tokens=8192,
             temperature=1,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}],
